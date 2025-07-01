@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gửi Email Có Giới Hạn Thời Gian</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        h1 {
+            color: #333;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        input[type="file"], input[type="number"] {
+            margin: 10px 0;
+        }
+        #log {
+            background: #f8f8f8;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔐 Gửi Email Có Giới Hạn Thời Gian</h1>
+
+    <div class="section">
+        <h2>Trạng thái hệ thống:</h2>
+        <p id="status">Đang khởi tạo...</p>
+    </div>
+
+    <div class="section">
+        <h2>1. Bắt tay</h2>
+        <button id="handshakeBtn" onclick="startHandshake()">Bắt đầu Handshake</button>
+    </div>
+
+    <div class="section">
+        <h2>2. Gửi File</h2>
+        <form id="uploadForm">
+            <label for="fileInput">Chọn file văn bản (.txt):</label><br>
+            <input type="file" id="fileInput" accept=".txt" required><br>
+            <label for="expirationInput">Thời gian hết hạn (giờ):</label><br>
+            <input type="number" id="expirationInput" min="1" value="24" required>
+            <p>Mặc định: 24 giờ</p>
+            <button type="submit" id="uploadBtn" disabled>Mã hóa và Gửi File</button>
+        </form>
+    </div>
+
+    <div class="section">
+        <h2>Log thời gian thực:</h2>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3000';
+        let sessionId = null;
+        let publicKey = null;
+
+        // Log function
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toISOString();
+            logDiv.innerHTML += `[${timestamp}] ${message}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        // Update status
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+
+        // Start handshake
+        async function startHandshake() {
+            try {
+                log('Bắt đầu quá trình handshake...');
+                const handshakeBtn = document.getElementById('handshakeBtn');
+                handshakeBtn.disabled = true;
+
+                const response = await fetch(`${API_URL}/api/handshake`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: 'Hello!' })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.message === 'Ready!') {
+                    sessionId = data.sessionId;
+                    publicKey = data.publicKey;
+                    log(`Handshake thành công! SessionID: ${sessionId}`);
+                    updateStatus('Handshake hoàn thành, sẵn sàng gửi file');
+                    document.getElementById('uploadBtn').disabled = false;
+                } else {
+                    throw new Error(data.error || 'Handshake thất bại');
+                }
+            } catch (error) {
+                log(`Lỗi handshake: ${error.message}`);
+                updateStatus('Lỗi handshake');
+                document.getElementById('handshakeBtn').disabled = false;
+            }
+        }
+
+        // Handle file upload
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('fileInput');
+            const expirationInput = document.getElementById('expirationInput');
+            const uploadBtn = document.getElementById('uploadBtn');
+
+            if (!sessionId) {
+                log('Lỗi: Vui lòng thực hiện handshake trước');
+                return;
+            }
+
+            if (!fileInput.files[0]) {
+                log('Lỗi: Vui lòng chọn một file văn bản (.txt)');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            if (!file.name.endsWith('.txt')) {
+                log('Lỗi: Chỉ chấp nhận file có định dạng .txt');
+                return;
+            }
+
+            const expirationHours = parseInt(expirationInput.value) || 24;
+            const expirationDate = new Date(Date.now() + expirationHours * 60 * 60 * 1000).toISOString();
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('sessionId', sessionId);
+            formData.append('filename', file.name);
+            formData.append('expiration', expirationDate);
+
+            try {
+                uploadBtn.disabled = true;
+                log(`Đang mã hóa và gửi file ${file.name}...`);
+
+                const response = await fetch(`${API_URL}/api/send-file`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`File ${file.name} gửi thành công! FileID: ${data.fileId}`);
+                    updateStatus(`File ${file.name} đã được mã hóa và gửi`);
+                    fileInput.value = ''; // Reset file input
+                } else {
+                    throw new Error(data.error || 'Gửi file thất bại');
+                }
+            } catch (error) {
+                log(`Lỗi gửi file: ${error.message}`);
+                updateStatus('Lỗi gửi file');
+            } finally {
+                uploadBtn.disabled = false;
+            }
+        });
+
+        // Initialize
+        updateStatus('Sẵn sàng để bắt tay');
+        log('Hệ thống khởi tạo thành công');
+    </script>
+</body>
+</html>

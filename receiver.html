@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nhận Email Có Giới Hạn Thời Gian</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        h1, h3 {
+            color: #333;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        input[type="text"] {
+            padding: 8px;
+            width: 300px;
+            margin: 10px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f0f0f0;
+        }
+        #logContainer {
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔐 Nhận Email Có Giới Hạn Thời Gian</h1>
+    
+    <div class="section" id="status">
+        <h3>Trạng thái hệ thống:</h3>
+        <div id="realTimeStatus">Đang khởi tạo...</div>
+    </div>
+    
+    <div class="section" id="availableFiles">
+        <h3>File có sẵn:</h3>
+        <button id="refreshBtn">Làm mới danh sách</button>
+        <div id="filesList"></div>
+    </div>
+    
+    <div class="section" id="receiveSection">
+        <h3>Nhận File</h3>
+        <form id="receiveForm">
+            <div>
+                <label for="fileIdInput">Nhập File ID:</label><br>
+                <input type="text" id="fileIdInput" placeholder="Dán File ID từ người gửi" required>
+            </div>
+            <button type="submit" id="receiveBtn">Nhận File</button>
+        </form>
+        <div id="receiveResult"></div>
+    </div>
+    
+    <div class="section" id="logSection">
+        <h3>Log thời gian thực:</h3>
+        <div id="logContainer"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3000';
+
+        // Hàm log thời gian thực
+        function addLog(message) {
+            const logContainer = document.getElementById('logContainer');
+            const timestamp = new Date().toLocaleString('vi-VN');
+            logContainer.innerHTML += `<div><strong>[${timestamp}]</strong> ${message}</div>`;
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        // Cập nhật trạng thái thời gian thực
+        function updateStatus(status) {
+            document.getElementById('realTimeStatus').textContent = status;
+            addLog(`Trạng thái: ${status}`);
+        }
+
+        // Định dạng thời gian còn lại
+        function formatTimeLeft(seconds) {
+            if (seconds <= 0) return 'Đã hết hạn';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            return `${hours}h ${minutes}m ${secs}s`;
+        }
+
+        // Tải danh sách file có sẵn
+        async function loadAvailableFiles() {
+            try {
+                updateStatus('Đang tải danh sách file...');
+                const response = await fetch(`${API_URL}/api/available-files`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}: Lỗi tải danh sách file`);
+                
+                const files = await response.json();
+                const filesList = document.getElementById('filesList');
+                
+                if (files.length === 0) {
+                    filesList.innerHTML = '<p style="color: #666;">Không có file nào khả dụng</p>';
+                    updateStatus('Không có file nào để nhận');
+                } else {
+                    let html = '<table><tr><th>File ID</th><th>Tên file</th><th>Hết hạn</th><th>Thời gian còn lại</th><th>Hành động</th></tr>';
+                    files.forEach(file => {
+                        const timeLeft = formatTimeLeft(file.timeLeft);
+                        const expirationDate = new Date(file.expiration).toLocaleString('vi-VN');
+                        const isExpired = file.timeLeft <= 0;
+                        html += `
+                            <tr style="${isExpired ? 'background-color: #ffcccc;' : ''}">
+                                <td style="font-family: monospace; font-size: 12px;">${file.fileId}</td>
+                                <td>${file.filename}</td>
+                                <td>${expirationDate}</td>
+                                <td style="color: ${isExpired ? 'red' : 'green'};">${timeLeft}</td>
+                                <td>
+                                    <button onclick="quickReceive('${file.fileId}')" 
+                                            ${isExpired ? 'disabled' : ''}>
+                                        ${isExpired ? 'Đã hết hạn' : 'Nhận ngay'}
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    html += '</table>';
+                    filesList.innerHTML = html;
+                    updateStatus(`Tìm thấy ${files.length} file`);
+                }
+                
+                addLog(`Đã tải ${files.length} file từ server`);
+            } catch (error) {
+                document.getElementById('filesList').innerHTML = `<p style="color: red;">Lỗi tải danh sách: ${error.message}</p>`;
+                updateStatus('Lỗi tải danh sách file');
+                addLog(`Lỗi tải danh sách: ${error.message}`);
+            }
+        }
+
+        // Nhận file nhanh từ bảng
+        window.quickReceive = async function(fileId) {
+            document.getElementById('fileIdInput').value = fileId;
+            await receiveFile(fileId);
+        };
+
+        // Nhận file
+        async function receiveFile(fileId) {
+            try {
+                const receiveBtn = document.getElementById('receiveBtn');
+                receiveBtn.disabled = true;
+                updateStatus('Đang xác thực và nhận file...');
+                addLog(`Bắt đầu nhận file: ${fileId}`);
+                
+                const response = await fetch(`${API_URL}/api/receive-file`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fileId })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('receiveResult').innerHTML = `
+                        <div style="color: green; border: 2px solid green; padding: 15px; margin: 10px 0;">
+                            <h4>✓ ${data.message}</h4>
+                            <p><strong>Tên file:</strong> ${data.filename}</p>
+                            <p><strong>Đã lưu tại:</strong> ${data.savedPath}</p>
+                            <p><strong>Thời gian nhận:</strong> ${new Date().toLocaleString('vi-VN')}</p>
+                        </div>
+                    `;
+                    updateStatus('File đã được nhận và giải mã thành công');
+                    addLog(`ACK - File ${data.filename} đã được nhận thành công`);
+                    addLog(`File đã lưu tại: ${data.savedPath}`);
+                    setTimeout(loadAvailableFiles, 1000); // Làm mới danh sách
+                } else {
+                    let errorMessage = '';
+                    let errorColor = 'red';
+                    switch (data.error) {
+                        case 'TIMEOUT':
+                            errorMessage = `⏰ ${data.message}`;
+                            break;
+                        case 'INTEGRITY':
+                            errorMessage = `🛡️ ${data.message}`;
+                            break;
+                        case 'SIGNATURE':
+                            errorMessage = `🔐 ${data.message}`;
+                            break;
+                        case 'NACK':
+                            errorMessage = `❌ ${data.message}`;
+                            break;
+                        default:
+                            errorMessage = `❌ ${data.error}: ${data.message}`;
+                    }
+                    document.getElementById('receiveResult').innerHTML = `
+                        <div style="color: ${errorColor}; border: 2px solid ${errorColor}; padding: 15px; margin: 10px 0;">
+                            <h4>${errorMessage}</h4>
+                            <p><strong>File ID:</strong> ${fileId}</p>
+                            <p><strong>Thời gian thử:</strong> ${new Date().toLocaleString('vi-VN')}</p>
+                        </div>
+                    `;
+                    updateStatus(`Nhận file thất bại: ${data.error}`);
+                    addLog(`NACK - Lỗi nhận file: ${errorMessage}`);
+                }
+            } catch (error) {
+                document.getElementById('receiveResult').innerHTML = `
+                    <div style="color: red; border: 2px solid red; padding: 15px; margin: 10px 0;">
+                        <h4>❌ Lỗi kết nối server</h4>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                updateStatus('Lỗi kết nối server');
+                addLog(`Lỗi kết nối: ${error.message}`);
+            } finally {
+                document.getElementById('receiveBtn').disabled = false;
+            }
+        }
+
+        // Form submit
+        document.getElementById('receiveForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileId = document.getElementById('fileIdInput').value.trim();
+            if (!fileId) {
+                alert('Vui lòng nhập File ID!');
+                return;
+            }
+            await receiveFile(fileId);
+        });
+
+        // Refresh button
+        document.getElementById('refreshBtn').addEventListener('click', loadAvailableFiles);
+
+        // Tự động cập nhật danh sách mỗi 5 giây
+        setInterval(loadAvailableFiles, 5000);
+
+        // Khởi tạo
+        updateStatus('Hệ thống sẵn sàng - Đang tải danh sách file...');
+        addLog('Trang nhận file đã được tải');
+        loadAvailableFiles();
+    </script>
+</body>
+</html>
